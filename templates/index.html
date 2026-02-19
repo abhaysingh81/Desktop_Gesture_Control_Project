@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture Control Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Gesture Control</h1>
+            <div class="status-bar">
+                <span id="system-status">System Ready</span>
+                <select id="recognition-mode">
+                    <option value="mediapipe">MediaPipe (Heuristic)</option>
+                    <option value="cnn" selected>CNN (Trained)</option>
+                </select>
+                <button id="retrain-btn" class="btn">Retrain Model</button>
+            </div>
+        </header>
+
+        <div class="main-panel">
+            <div class="video-section">
+                <video id="webcam" autoplay muted playsinline></video>
+                <canvas id="output-canvas" width="640" height="480"></canvas>
+                <div id="prediction">Current Gesture: <span id="gesture-name">None</span></div>
+            </div>
+
+            <div class="config-panel">
+                <h2>Gestures & Actions</h2>
+                <div class="action-list" id="gesture-list"></div>
+                <div class="add-gesture">
+                    <h3>Add New Gesture</h3>
+                    <input type="text" id="new-gesture-name" placeholder="Gesture name (e.g., Peace)">
+                    <select id="new-gesture-action">
+                        <option value="play_pause">Play/Pause</option>
+                        <option value="next_track">Next Track</option>
+                        <option value="prev_track">Previous Track</option>
+                        <option value="volume_up">Volume Up</option>
+                        <option value="volume_down">Volume Down</option>
+                        <option value="mute">Mute</option>
+                        <option value="tab_next">Next Tab</option>
+                        <option value="tab_prev">Previous Tab</option>
+                        <option value="window_next">Next Window</option>
+                        <option value="window_prev">Previous Window</option>
+                        <option value="browser_back">Browser Back</option>
+                        <option value="browser_forward">Browser Forward</option>
+                    </select>
+                    <button id="start-record" class="btn">Record Samples (5 sec)</button>
+                    <span id="record-status"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/js/script.js"></script>
+</body>
+</html>
