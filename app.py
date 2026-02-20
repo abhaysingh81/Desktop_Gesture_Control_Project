@@ -5,6 +5,10 @@ import desktop_control as dc
 import model as ml
 import torch
 import numpy as np
+from model import EmbeddingNet, GestureDB, train_embedding_model, MODEL_PATH, DEVICE
+import gesture_db as db   
+import os
+import numpy as np
 
 app = Flask(__name__)
 CORS(app)
@@ -13,6 +17,11 @@ db.init_db()
 # Global state
 current_model = None
 gesture_labels = []  # list of gesture names in order of classes
+embedding_net = EmbeddingNet().to(DEVICE)
+if os.path.exists(MODEL_PATH):
+    embedding_net.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+gesture_db = GestureDB(model=embedding_net)
+
 
 def update_model():
     global current_model, gesture_labels
@@ -64,8 +73,12 @@ def add_gesture():
 
 @app.route('/api/gestures/<int:gid>', methods=['DELETE'])
 def delete_gesture(gid):
+    # Get name before deleting
+    gestures = db.get_gestures()
+    gesture_name = next((g['name'] for g in gestures if g['id'] == gid), None)
     db.delete_gesture(gid)
-    update_model()  # retrain after deletion? optional, but we have explicit retrain button
+    if gesture_name:
+        gesture_db.remove_gesture(gesture_name)
     return jsonify({'success': True})
 
 @app.route('/api/gestures/<int:gid>/action', methods=['PUT'])
@@ -73,6 +86,11 @@ def update_action(gid):
     data = request.json
     action = data.get('action')
     db.update_gesture_action(gid, action)
+    # Also update in gesture_db
+    gestures = db.get_gestures()
+    gesture_name = next((g['name'] for g in gestures if g['id'] == gid), None)
+    if gesture_name:
+        gesture_db.update_action(gesture_name, action)
     return jsonify({'success': True})
 
 @app.route('/api/samples', methods=['POST'])
@@ -82,28 +100,59 @@ def add_sample():
     landmarks = data.get('landmarks')
     if not gid or not landmarks:
         return jsonify({'error': 'Missing data'}), 400
+    # 1. Store in SQLite (for future retraining)
     db.add_sample(gid, landmarks)
+    # 2. Update GestureDB (need gesture name)
+    gestures = db.get_gestures()
+    gesture_name = next((g['name'] for g in gestures if g['id'] == gid), None)
+    if gesture_name:
+        # We add this single sample to the live index
+        gesture_db.add_gesture_samples(gesture_name, "", [landmarks])  # action not updated here
     return jsonify({'success': True})
 
 @app.route('/api/retrain', methods=['POST'])
 def retrain():
-    update_model()
-    return jsonify({'success': True, 'num_gestures': len(gesture_labels)})
+    # 1. Collect all samples from SQLite
+    samples_data = db.get_all_samples()   # returns list of (gesture_name, landmarks)
+    if not samples_data:
+        return jsonify({'error': 'No samples'}), 400
+    # Prepare lists for training
+    gestures = db.get_gestures()
+    name_to_action = {g['name']: g['action'] for g in gestures}
+    # We need integer labels for training – map names to indices
+    unique_names = list(set([name for name, _ in samples_data]))
+    name_to_idx = {name: i for i, name in enumerate(unique_names)}
+    landmarks_list = []
+    labels_list = []
+    for name, lm in samples_data:
+        landmarks_list.append(lm)
+        labels_list.append(name_to_idx[name])
+
+    # 2. Train new embedding model
+    model = train_embedding_model(landmarks_list, labels_list)
+    if model is None:
+        return jsonify({'error': 'Training failed (need at least 2 classes)'}), 400
+
+    # 3. Update global model in gesture_db
+    gesture_db.model = model
+    # 4. Rebuild gesture_db embeddings from all samples (using new model)
+    #    We also need to restore actions
+    gesture_db.rebuild_from_samples(samples_data)
+    # 5. Update class_to_action from current gestures
+    for g in gestures:
+        gesture_db.class_to_action[g['name']] = g['action']
+    gesture_db.save()
+
+    return jsonify({'success': True, 'num_classes': len(unique_names)})
 
 @app.route('/api/predict', methods=['POST'])
 def predict():
-    global current_model, gesture_labels
     data = request.json
     landmarks = data.get('landmarks')
     if not landmarks:
         return jsonify({'error': 'No landmarks'}), 400
-    if current_model is None or not gesture_labels:
-        return jsonify({'gesture': None, 'error': 'Model not trained'}), 400
-    pred = ml.predict(landmarks, current_model, gesture_labels)
-    # Find action for this gesture
-    gestures = db.get_gestures()
-    action = next((g['action'] for g in gestures if g['name'] == pred), None)
-    return jsonify({'gesture': pred, 'action': action})
+    gesture, action = gesture_db.predict(landmarks, k=3)  
+    return jsonify({'gesture': gesture, 'action': action})
 
 @app.route('/api/execute', methods=['POST'])
 def execute():

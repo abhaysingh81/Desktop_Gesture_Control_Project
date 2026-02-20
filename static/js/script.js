@@ -9,11 +9,12 @@ let recognitionMode = document.getElementById('recognition-mode');
 let retrainBtn = document.getElementById('retrain-btn');
 let startRecordBtn = document.getElementById('start-record');
 let recordStatus = document.getElementById('record-status');
-
+let inferenceActive = false;   
 let currentGestures = [];
 let recording = false;
 let recordingGestureId = null;
 let recordingInterval = null;
+
 
 // Initialize MediaPipe Hands
 const hands = new Hands({
@@ -31,7 +32,9 @@ hands.onResults(onHandResults);
 
 const camera = new Camera(videoElement, {
     onFrame: async () => {
-        await hands.send({image: videoElement});
+        if (inferenceActive) {
+            await hands.send({image: videoElement});
+        }
     },
     width: 640,
     height: 480
@@ -75,6 +78,7 @@ function heuristicGesture(landmarks) {
 }
 
 // Process hand results
+// Process hand results
 function onHandResults(results) {
     canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
     if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
@@ -92,9 +96,11 @@ function onHandResults(results) {
         const mode = recognitionMode.value;
         if (mode === 'mediapipe') {
             const gesture = heuristicGesture(landmarks);
-            predictionSpan.innerText = gesture;
-            // Execute action if mapped (we need to get action from currentGestures)
             const gestureObj = currentGestures.find(g => g.name === gesture);
+            const action = gestureObj ? gestureObj.action : null;
+            // Display gesture and action together
+            predictionSpan.innerText = gesture + (action ? ' → ' + action : '');
+            // Execute action if mapped
             if (gestureObj && gestureObj.action) {
                 fetch('/api/execute', {
                     method: 'POST',
@@ -112,7 +118,8 @@ function onHandResults(results) {
             .then(res => res.json())
             .then(data => {
                 if (data.gesture) {
-                    predictionSpan.innerText = data.gesture;
+                    // Display gesture and action together
+                    predictionSpan.innerText = data.gesture + (data.action ? ' → ' + data.action : '');
                     if (data.action) {
                         fetch('/api/execute', {
                             method: 'POST',
@@ -192,12 +199,15 @@ function renderGestures() {
     });
 
     document.querySelectorAll('.delete-gesture').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            const gid = e.target.dataset.id;
-            fetch(`/api/gestures/${gid}`, {method: 'DELETE'})
-                .then(() => loadGestures());
-        });
+    btn.addEventListener('click', (e) => {
+        if (!confirm('Are you sure you want to delete this gesture? All recorded samples will be lost.')) {
+            return;
+        }
+        const gid = e.target.dataset.id;
+        fetch(`/api/gestures/${gid}`, {method: 'DELETE'})
+            .then(() => loadGestures());
     });
+});
 }
 
 // Add new gesture
@@ -253,6 +263,22 @@ retrainBtn.addEventListener('click', () => {
                 systemStatus.innerText = 'System Ready';
             }, 2000);
         });
+});
+
+// Start/Stop inference buttons
+document.getElementById('start-inference').addEventListener('click', () => {
+    inferenceActive = true;
+    systemStatus.innerText = 'System Ready';
+    systemStatus.style.background = '#4CAF50';
+});
+
+document.getElementById('stop-inference').addEventListener('click', () => {
+    inferenceActive = false;
+    systemStatus.innerText = 'Inference Stopped';
+    systemStatus.style.background = '#9e9e9e'; // grey
+    // Optionally clear the canvas
+    canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+    predictionSpan.innerText = 'Stopped';
 });
 
 // Initial load
